@@ -1,0 +1,18 @@
+apiVersion: v2
+name: postcards
+description: Helm chart for PostcardsRust - automated Swiss Postcard Creator with Immich & Google Photos
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+icon: https://raw.githubusercontent.com/CPlusPlus17/PostcardsRust/main/assets/icon.png
+keywords:
+  - postcards
+  - swisspost
+  - immich
+  - google-photos
+  - automation
+home: https://github.com/CPlusPlus17/PostcardsRust
+sources:
+  - https://github.com/CPlusPlus17/PostcardsRust
+maintainers:
+  - name: CPlusPlus17

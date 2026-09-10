@@ -1,0 +1,144 @@
+# Default values for PostcardsRust Helm chart.
+# This chart deploys PostcardsRust in daemon mode or cronjob mode.
+
+image:
+  repository: ghcr.io/cplusplus17/postcards-rust
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Deployment mode:
+# - "daemon" : Runs as a continuous Deployment with internal sync timer & 7-day cooldown scheduler
+# - "cronjob": Runs as a scheduled Kubernetes CronJob executing `postcards-rust send`
+mode: daemon
+
+# Daemon mode configuration
+daemon:
+  # Cooldown in days between postcards (default: 7, matches Swiss Post retention)
+  cooldownDays: 7
+  # Minutes between checking the album for new photos (default: 60)
+  syncMinutes: 60
+  # Attempt to send on container startup if quota is available, even if within cooldown
+  forceInitial: false
+  # Message text printed on the back of the postcard (optional)
+  customMessage: ""
+
+# CronJob mode configuration (applicable only when mode: "cronjob")
+cronjob:
+  # Cron schedule: default every Sunday at 08:00 UTC
+  schedule: "0 8 * * 0"
+  # Disallow concurrent job runs
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # Force send even if local cooldown has not elapsed (still respects Swiss Post quota)
+  force: false
+  # Message text printed on the back of the postcard (optional)
+  customMessage: ""
+
+# Photo Backend Plugin selection: "immich" (recommended) or "google-photos"
+plugin: immich
+
+# Immich photo backend settings
+immich:
+  # Immich instance base URL (e.g. "https://photos.example.com" or "http://immich:2283")
+  instanceUrl: ""
+  # Immich API key (sent as x-api-key)
+  apiKey: ""
+  # Album name (e.g. "Postcards") or album UUID
+  album: "Postcards"
+  # Set to true to allow self-signed or invalid TLS certificates
+  insecureTls: false
+  # Reference an existing Secret containing apiKey instead of defining apiKey above.
+  # Expected key in secret: "IMMICH_API_KEY"
+  existingSecret: ""
+
+# Swiss Post PCC credentials (used for initial login or token refresh)
+pcc:
+  # SwissID login email/username
+  username: ""
+  # SwissID password
+  password: ""
+  # Reference an existing Secret containing SwissID credentials.
+  # Expected keys: "PCD_USERNAME", "PCD_PASSWORD"
+  existingSecret: ""
+
+# Initial Swiss Post OAuth token (optional)
+# Allows seeding ~/.postcards_rust/token.json to bypass 2FA SMS on the first run.
+token:
+  # Raw JSON string or content of your local ~/.postcards_rust/token.json
+  initialTokenJson: ""
+  # Or reference an existing secret containing token.json under key "token.json"
+  existingSecret: ""
+
+# Sender address (stamped on the postcard)
+sender:
+  firstName: ""
+  lastName: ""
+  street: ""
+  zip: ""
+  city: ""
+  company: ""
+
+# Recipient address (postcard destination)
+recipient:
+  firstName: ""
+  lastName: ""
+  street: ""
+  zip: ""
+  city: ""
+  country: "SWITZERLAND"
+  company: ""
+
+# Persistence for state, OAuth tokens, and downloaded photo queue
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  # Mount path inside the container (/data is set as HOME)
+  mountPath: /data
+  # Use an existing PersistentVolumeClaim instead of creating one
+  existingClaim: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 10001
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  allowPrivilegeEscalation: false
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Additional environment variables
+extraEnv: []

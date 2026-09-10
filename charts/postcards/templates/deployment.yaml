@@ -1,0 +1,121 @@
+{{- if eq .Values.mode "daemon" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "postcards.fullname" . }}
+  labels:
+    {{- include "postcards.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "postcards.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "postcards.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "postcards.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if or .Values.token.initialTokenJson .Values.token.existingSecret }}
+      initContainers:
+        - name: seed-token
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              if [ ! -f /data/.postcards_rust/token.json ]; then
+                echo "Seeding initial Swiss Post OAuth token to PVC..."
+                mkdir -p /data/.postcards_rust
+                cp /seed/token.json /data/.postcards_rust/token.json
+                chmod 600 /data/.postcards_rust/token.json
+                echo "Token seeded successfully."
+              else
+                echo "Token file already exists on PVC, skipping seed."
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+            - name: seed-token-vol
+              mountPath: /seed
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["postcards-rust"]
+          args:
+            - "daemon"
+            - "--cooldown-days"
+            - {{ .Values.daemon.cooldownDays | quote }}
+            - "--sync-minutes"
+            - {{ .Values.daemon.syncMinutes | quote }}
+            {{- if .Values.daemon.forceInitial }}
+            - "--force"
+            {{- end }}
+            {{- if .Values.daemon.customMessage }}
+            - "--message"
+            - {{ .Values.daemon.customMessage | quote }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "postcards.fullname" . }}-config
+            {{- if or .Values.immich.apiKey .Values.immich.existingSecret }}
+            - secretRef:
+                name: {{ include "postcards.immichSecretName" . }}
+            {{- end }}
+            {{- if or .Values.pcc.username .Values.pcc.password .Values.pcc.existingSecret }}
+            - secretRef:
+                name: {{ include "postcards.pccSecretName" . }}
+            {{- end }}
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "postcards.pvcName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if or .Values.token.initialTokenJson .Values.token.existingSecret }}
+        - name: seed-token-vol
+          secret:
+            secretName: {{ include "postcards.tokenSecretName" . }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

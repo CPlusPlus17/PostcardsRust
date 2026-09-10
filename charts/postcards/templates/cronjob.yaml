@@ -1,0 +1,118 @@
+{{- if eq .Values.mode "cronjob" }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "postcards.fullname" . }}
+  labels:
+    {{- include "postcards.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy | default "Forbid" }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit | default 3 }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit | default 3 }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+            {{- with .Values.podAnnotations }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          labels:
+            {{- include "postcards.selectorLabels" . | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          serviceAccountName: {{ include "postcards.serviceAccountName" . }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          {{- if or .Values.token.initialTokenJson .Values.token.existingSecret }}
+          initContainers:
+            - name: seed-token
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command:
+                - sh
+                - -c
+                - |
+                  if [ ! -f /data/.postcards_rust/token.json ]; then
+                    echo "Seeding initial Swiss Post OAuth token to PVC..."
+                    mkdir -p /data/.postcards_rust
+                    cp /seed/token.json /data/.postcards_rust/token.json
+                    chmod 600 /data/.postcards_rust/token.json
+                    echo "Token seeded successfully."
+                  else
+                    echo "Token file already exists on PVC, skipping seed."
+                  fi
+              volumeMounts:
+                - name: data
+                  mountPath: {{ .Values.persistence.mountPath }}
+                - name: seed-token-vol
+                  mountPath: /seed
+          {{- end }}
+          containers:
+            - name: {{ .Chart.Name }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["postcards-rust"]
+              args:
+                - "send"
+                {{- if .Values.cronjob.force }}
+                - "--force"
+                {{- end }}
+                {{- if .Values.cronjob.customMessage }}
+                - "--message"
+                - {{ .Values.cronjob.customMessage | quote }}
+                {{- end }}
+              envFrom:
+                - configMapRef:
+                    name: {{ include "postcards.fullname" . }}-config
+                {{- if or .Values.immich.apiKey .Values.immich.existingSecret }}
+                - secretRef:
+                    name: {{ include "postcards.immichSecretName" . }}
+                {{- end }}
+                {{- if or .Values.pcc.username .Values.pcc.password .Values.pcc.existingSecret }}
+                - secretRef:
+                    name: {{ include "postcards.pccSecretName" . }}
+                {{- end }}
+              {{- with .Values.extraEnv }}
+              env:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: data
+                  mountPath: {{ .Values.persistence.mountPath }}
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+          volumes:
+            - name: data
+              {{- if .Values.persistence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ include "postcards.pvcName" . }}
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+            {{- if or .Values.token.initialTokenJson .Values.token.existingSecret }}
+            - name: seed-token-vol
+              secret:
+                secretName: {{ include "postcards.tokenSecretName" . }}
+            {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

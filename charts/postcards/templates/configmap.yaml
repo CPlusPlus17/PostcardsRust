@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "postcards.fullname" . }}-config
+  labels:
+    {{- include "postcards.labels" . | nindent 4 }}
+data:
+  PCD_PLUGIN: {{ .Values.plugin | quote }}
+  {{- if .Values.immich.instanceUrl }}
+  IMMICH_INSTANCE_URL: {{ .Values.immich.instanceUrl | quote }}
+  {{- end }}
+  {{- if .Values.immich.album }}
+  IMMICH_ALBUM: {{ .Values.immich.album | quote }}
+  {{- end }}
+  {{- if .Values.immich.insecureTls }}
+  IMMICH_INSECURE_TLS: "1"
+  {{- end }}
+  {{- if .Values.sender.firstName }}
+  PCD_SENDERFIRSTNAME: {{ .Values.sender.firstName | quote }}
+  {{- end }}
+  {{- if .Values.sender.lastName }}
+  PCD_SENDERLASTNAME: {{ .Values.sender.lastName | quote }}
+  {{- end }}
+  {{- if .Values.sender.street }}
+  PCD_SENDERSTREET: {{ .Values.sender.street | quote }}
+  {{- end }}
+  {{- if .Values.sender.zip }}
+  PCD_SENDERZIP: {{ .Values.sender.zip | quote }}
+  {{- end }}
+  {{- if .Values.sender.city }}
+  PCD_SENDERCITY: {{ .Values.sender.city | quote }}
+  {{- end }}
+  {{- if .Values.sender.company }}
+  PCD_SENDERCOMPANY: {{ .Values.sender.company | quote }}
+  {{- end }}
+  {{- if .Values.recipient.firstName }}
+  PCD_RECIPIENTFIRSTNAME: {{ .Values.recipient.firstName | quote }}
+  {{- end }}
+  {{- if .Values.recipient.lastName }}
+  PCD_RECIPIENTLASTNAME: {{ .Values.recipient.lastName | quote }}
+  {{- end }}
+  {{- if .Values.recipient.street }}
+  PCD_RECIPIENTSTREET: {{ .Values.recipient.street | quote }}
+  {{- end }}
+  {{- if .Values.recipient.zip }}
+  PCD_RECIPIENTZIP: {{ .Values.recipient.zip | quote }}
+  {{- end }}
+  {{- if .Values.recipient.city }}
+  PCD_RECIPIENTCITY: {{ .Values.recipient.city | quote }}
+  {{- end }}
+  {{- if .Values.recipient.country }}
+  PCD_RECIPIENTCOUNTRY: {{ .Values.recipient.country | quote }}
+  {{- end }}
+  {{- if .Values.recipient.company }}
+  PCD_RECIPIENTCOMPANY: {{ .Values.recipient.company | quote }}
+  {{- end }}
