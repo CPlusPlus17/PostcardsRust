@@ -1,0 +1,12 @@
+[package]
+edition = "2021"
+name = "postcards-rust-api"
+description = "Swiss Postcard Creator API facade (port of PostcardsDotnet.API)"
+
+[dependencies]
+postcards-rust-core = { workspace = true }
+postcards-rust-plugin-base = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

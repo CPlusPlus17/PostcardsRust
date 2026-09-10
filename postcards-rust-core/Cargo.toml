@@ -1,0 +1,24 @@
+[package]
+edition = "2021"
+name = "postcards-rust-core"
+description = "Core types, SwissId login and image helpers for PostcardsRust"
+
+[dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+image = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

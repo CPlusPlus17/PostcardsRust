@@ -1,0 +1,8 @@
+[package]
+edition = "2021"
+name = "postcards-rust-plugin-base"
+description = "Plugin command trait for PostcardsRust (port of PluginBase.ICommand)"
+
+[dependencies]
+async-trait = { workspace = true }
+anyhow = { workspace = true }

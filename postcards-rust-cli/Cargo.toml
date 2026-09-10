@@ -1,0 +1,19 @@
+[package]
+edition = "2021"
+name = "postcards-rust-cli"
+description = "PostcardsRust CLI (port of PostcardsDotnet.Cli)"
+
+[[bin]]
+name = "postcards-rust"
+path = "src/main.rs"
+
+[dependencies]
+postcards-rust-core = { workspace = true }
+postcards-rust-api = { workspace = true }
+postcards-rust-plugin-base = { workspace = true }
+postcards-rust-plugin-google-photos = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
