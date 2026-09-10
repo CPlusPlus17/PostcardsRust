@@ -56,10 +56,11 @@ pub struct RecipientAddress {
 
 /// Quota object returned by `user/quota`.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PostcardCreatorQuota {
-    pub quota: u64,
-    pub end: DateTime<Utc>,
-    pub retention_days: u64,
+    pub quota: i64,
+    pub end: Option<DateTime<Utc>>,
+    pub retention_days: Option<i64>,
     pub available: bool,
     #[serde(default)]
     pub next: Option<DateTime<Utc>>,
@@ -67,12 +68,13 @@ pub struct PostcardCreatorQuota {
 
 /// Logged-in user object (`user/current`).
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PostcardCreatorUser {
     #[serde(default)]
-    pub company: String,
-    #[serde(default, rename = "firstname")]
+    pub company: Option<String>,
+    #[serde(default)]
     pub first_name: String,
-    #[serde(default, rename = "lastname")]
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub street: String,
@@ -84,6 +86,7 @@ pub struct PostcardCreatorUser {
 
 /// Account balance (`billingOnline/accountSaldo`).
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Balance {
     #[serde(default)]
     pub forecast_saldo: Option<f64>,
@@ -109,31 +112,85 @@ struct CardUpload<'a> {
     stamp: Option<String>,
 }
 
-/// Swiss Postcard Creator REST API.
-#[derive(Debug, Clone)]
+fn pcc_curl(
+    url: &str,
+    method: &str,
+    access_token: &str,
+    body: Option<&str>,
+    extra_headers: &[(&str, &str)],
+    custom_ua: Option<&str>,
+) -> anyhow::Result<(u32, String)> {
+    let mut e = curl::easy::Easy::new();
+    e.url(url)?;
+    e.timeout(std::time::Duration::from_secs(30))?;
+    e.useragent(custom_ua.unwrap_or(USER_AGENT))?;
+    e.http_version(curl::easy::HttpVersion::V11)?;
+
+    match method {
+        "GET" => {
+            e.get(true)?;
+        }
+        "POST" => {
+            e.post(true)?;
+            if body.is_none() {
+                e.post_field_size(0)?;
+            }
+        }
+        _ => {}
+    }
+
+    if let Some(b) = body {
+        e.post_field_size(b.len() as u64)?;
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(b.as_bytes().to_vec()));
+        let buf2 = buf.clone();
+        e.read_function(move |out| {
+            let mut m = buf2.lock().unwrap();
+            let n = std::cmp::min(out.len(), m.len());
+            out[..n].copy_from_slice(&m[..n]);
+            m.drain(..n);
+            Ok(n)
+        })?;
+    }
+
+    let mut list = curl::easy::List::new();
+    if !access_token.is_empty() {
+        list.append(&format!("Authorization: Bearer {}", access_token))?;
+    }
+    list.append("Accept: application/json")?;
+    list.append(&format!("PCCApp-Version: {}", super::PCC_APP_VERSION))?;
+    list.append(&format!("PCCApp-OS: {}", super::PCC_APP_OS))?;
+    for (k, v) in extra_headers {
+        list.append(&format!("{k}: {v}"))?;
+    }
+    e.http_headers(list)?;
+
+    let body_out = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let bo2 = body_out.clone();
+    e.write_function(move |d| {
+        bo2.lock().unwrap().extend_from_slice(d);
+        Ok(d.len())
+    })?;
+
+    e.perform()?;
+    let status = e.response_code()?;
+    let body_bytes = body_out.lock().unwrap().clone();
+    let body_str = String::from_utf8_lossy(&body_bytes).to_string();
+    Ok((status, body_str))
+}
+
+/// Swiss Postcard Creator REST API client.
+#[derive(Debug, Clone, Default)]
 pub struct SwissPostcardCreatorApi {
-    client: reqwest::Client,
     access_token: String,
     token: Option<Token>,
     sender: Option<SenderAddress>,
     recipient: Option<RecipientAddress>,
 }
 
-impl Default for SwissPostcardCreatorApi {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SwissPostcardCreatorApi {
     /// Create a new API client (not logged in yet).
     pub fn new() -> Self {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .build()
-            .expect("http client");
         Self {
-            client,
             access_token: String::new(),
             token: None,
             sender: None,
@@ -149,11 +206,6 @@ impl SwissPostcardCreatorApi {
     /// The current access token (empty before login).
     pub fn access_token(&self) -> &str {
         &self.access_token
-    }
-
-    fn bearer(&self) -> reqwest::header::HeaderValue {
-        reqwest::header::HeaderValue::from_str(&format!("Bearer {}", self.access_token))
-            .expect("valid header value")
     }
 
     /// Login with SwissId credentials.
@@ -202,19 +254,13 @@ impl SwissPostcardCreatorApi {
 
     /// Get current quota.
     pub async fn get_quota(&self) -> anyhow::Result<PostcardCreatorQuota> {
-        let resp = self
-            .client
-            .get(format!("{}{}", super::PCC_API_BASE, "/user/quota"))
-            .header(reqwest::header::AUTHORIZATION, self.bearer())
-            .header(reqwest::header::ACCEPT, "application/json")
-            .header(reqwest::header::ORIGIN, "https://account.post.ch")
-            .header("X-App-Version", "4.38.1.0")
-            .header("X-Requested-With", "ch.post.it.pcc")
-            .send()
-            .await?;
-        let status = resp.status();
-        let body = resp.bytes().await?;
-        let txt = String::from_utf8_lossy(&body);
+        let url = format!("{}/user/quota", super::PCC_API_BASE);
+        let token = self.access_token.clone();
+        let (status, txt) = tokio::task::spawn_blocking(move || {
+            pcc_curl(&url, "GET", &token, None, &[], None)
+        })
+        .await??;
+
         tracing::debug!(
             status = %status,
             token_prefix = %self.access_token.chars().take(20).collect::<String>(),
@@ -223,7 +269,7 @@ impl SwissPostcardCreatorApi {
             "quota response"
         );
         std::fs::write("/tmp/e2e_quota_resp.txt", format!("status={status}\n{txt}")).ok();
-        if !status.is_success() {
+        if status < 200 || status >= 300 {
             anyhow::bail!("quota failed: {status} {txt}");
         }
         let res: serde_json::Value = serde_json::from_str(&txt)?;
@@ -233,30 +279,34 @@ impl SwissPostcardCreatorApi {
 
     /// Get logged-in user information.
     pub async fn get_user_information(&self) -> anyhow::Result<PostcardCreatorUser> {
-        let res: serde_json::Value = self
-            .client
-            .get(format!("{}/user/current", super::PCC_API_BASE))
-            .header(reqwest::header::AUTHORIZATION, self.bearer())
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let url = format!("{}/user/current", super::PCC_API_BASE);
+        let token = self.access_token.clone();
+        let (status, txt) = tokio::task::spawn_blocking(move || {
+            pcc_curl(&url, "GET", &token, None, &[], None)
+        })
+        .await??;
+
+        if status < 200 || status >= 300 {
+            anyhow::bail!("user info failed: {status} {txt}");
+        }
+        let res: serde_json::Value = serde_json::from_str(&txt)?;
         serde_json::from_value(res["model"].clone())
             .map_err(|e| anyhow::anyhow!("invalid json: {e}"))
     }
 
     /// Get account balance.
     pub async fn get_account_balance(&self) -> anyhow::Result<Balance> {
-        let res: serde_json::Value = self
-            .client
-            .get(format!("{}/billingOnline/accountSaldo", super::PCC_API_BASE))
-            .header(reqwest::header::AUTHORIZATION, self.bearer())
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let url = format!("{}/billingOnline/accountSaldo", super::PCC_API_BASE);
+        let token = self.access_token.clone();
+        let (status, txt) = tokio::task::spawn_blocking(move || {
+            pcc_curl(&url, "GET", &token, None, &[], None)
+        })
+        .await??;
+
+        if status < 200 || status >= 300 {
+            anyhow::bail!("balance failed: {status} {txt}");
+        }
+        let res: serde_json::Value = serde_json::from_str(&txt)?;
         serde_json::from_value(res["model"].clone())
             .map_err(|e| anyhow::anyhow!("invalid json: {e}"))
     }
@@ -297,16 +347,23 @@ impl SwissPostcardCreatorApi {
             stamp: None,
         };
 
-        let res = self
-            .client
-            .post(format!("{}/card/uploads", super::PCC_API_BASE))
-            .header(reqwest::header::AUTHORIZATION, self.bearer())
-            .header(reqwest::header::ACCEPT, "application/json")
-            .header(reqwest::header::ORIGIN, "https://account.post.ch")
-            .json(&payload)
-            .send()
-            .await?;
-        Ok(res.status().is_success())
+        let body_json = serde_json::to_string(&payload)?;
+        let url = format!("{}/card/uploads", super::PCC_API_BASE);
+        let token = self.access_token.clone();
+        let (status, txt) = tokio::task::spawn_blocking(move || {
+            pcc_curl(
+                &url,
+                "POST",
+                &token,
+                Some(&body_json),
+                &[("Content-Type", "application/json")],
+                None,
+            )
+        })
+        .await??;
+
+        tracing::debug!(status = %status, body = %txt, "card upload response");
+        Ok((200..300).contains(&status))
     }
 
     /// Inspect JWT claims in the access token for diagnostics.
@@ -327,7 +384,7 @@ impl SwissPostcardCreatorApi {
     /// Test candidate app-version transports (header, UA, query param) against
     /// `/user/quota` and report which clears the API's `appVersionValidation` guard.
     pub async fn probe_app_version(&self, version: &str) -> anyhow::Result<Vec<(String, String, String)>> {
-        let base = format!("{}{}", super::PCC_API_BASE, "/user/quota");
+        let base = format!("{}/user/quota", super::PCC_API_BASE);
         let mut out = Vec::new();
 
         if let Some(jwt) = self.inspect_jwt_token() {
@@ -335,11 +392,18 @@ impl SwissPostcardCreatorApi {
             out.push(("JWT token payload".to_string(), "INFO".to_string(), s));
         }
 
-        // Test other endpoints first with default headers
         for ep in &["/user/current", "/billingOnline/accountSaldo"] {
             let url = format!("{}{}", super::PCC_API_BASE, ep);
             let (label, status, err) = self.try_request(&url, &[], None, &format!("ENDPOINT {ep}")).await;
             out.push((label, status, err));
+        }
+
+        let (label, status, err) = self
+            .try_request(&base, &[("PCCApp-Version", version), ("PCCApp-OS", super::PCC_APP_OS)], None, "PCCApp-Version + PCCApp-OS")
+            .await;
+        out.push((label, status, err));
+        if out.last().unwrap().1 == "200" {
+            return Ok(out);
         }
 
         let versions = [version, "4.38.1", "4.38.0", "4.8.2.0"];
@@ -371,20 +435,18 @@ impl SwissPostcardCreatorApi {
             "X-Build-Version",
         ];
 
-        // 1. Headers with different version strings
         for v in &versions[..2] {
             for h in &header_names {
                 let (label, status, err) = self
                     .try_request(&base, &[(*h, v)], None, &format!("HDR {h}={v}"))
                     .await;
                 out.push((label, status, err));
-                if out.last().unwrap().1 == "200 OK" {
+                if out.last().unwrap().1 == "200" {
                     return Ok(out);
                 }
             }
         }
 
-        // 2. User-Agent variations
         let user_agents = [
             format!("PostCard/{version} (Linux; Android 12)"),
             format!("PostCard/4.38.1 (Linux; Android 12)"),
@@ -406,12 +468,11 @@ impl SwissPostcardCreatorApi {
                 .try_request(&base, &[], Some(ua), &format!("UA {ua}"))
                 .await;
             out.push((label, status, err));
-            if out.last().unwrap().1 == "200 OK" {
+            if out.last().unwrap().1 == "200" {
                 return Ok(out);
             }
         }
 
-        // 3. Query parameters
         let query_names = [
             "appVersion",
             "app_version",
@@ -430,26 +491,9 @@ impl SwissPostcardCreatorApi {
                     .try_request(&url, &[], None, &format!("QUERY ?{q}={v}"))
                     .await;
                 out.push((label, status, err));
-                if out.last().unwrap().1 == "200 OK" {
+                if out.last().unwrap().1 == "200" {
                     return Ok(out);
                 }
-            }
-        }
-
-        // 4. Multi-header combinations (e.g., App-Version + Platform)
-        let combos: &[(&[(&str, &str)], &str)] = &[
-            (&[("X-App-Version", version), ("X-Platform", "android")], "HDR X-App-Version + X-Platform=android"),
-            (&[("App-Version", version), ("X-Platform", "Android")], "HDR App-Version + X-Platform=Android"),
-            (&[("X-App-Version", "4.38.1"), ("X-Requested-With", "ch.post.it.pcc")], "HDR X-App-Version=4.38.1 + X-Req-With"),
-            (&[("App-Version", "4.38.1"), ("X-Requested-With", "ch.post.it.pcc")], "HDR App-Version=4.38.1 + X-Req-With"),
-            (&[("X-AppVersion", "4.38.1"), ("X-App-Name", "ch.post.it.pcc")], "HDR X-AppVersion=4.38.1 + X-App-Name"),
-            (&[("Client-Version", "4.38.1"), ("X-Requested-With", "ch.post.it.pcc")], "HDR Client-Version=4.38.1"),
-        ];
-        for (headers, label) in combos {
-            let (l, status, err) = self.try_request(&base, headers, None, label).await;
-            out.push((l, status, err));
-            if out.last().unwrap().1 == "200 OK" {
-                return Ok(out);
             }
         }
 
@@ -463,24 +507,25 @@ impl SwissPostcardCreatorApi {
         custom_ua: Option<&str>,
         label: &str,
     ) -> (String, String, String) {
-        let mut req = self
-            .client
-            .get(url)
-            .header(reqwest::header::AUTHORIZATION, self.bearer())
-            .header(reqwest::header::ACCEPT, "application/json")
-            .header(reqwest::header::ORIGIN, "https://account.post.ch");
+        let url_owned = url.to_string();
+        let token = self.access_token.clone();
+        let headers_owned: Vec<(String, String)> = extra_headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let ua_owned = custom_ua.map(|s| s.to_string());
 
-        if let Some(ua) = custom_ua {
-            req = req.header(reqwest::header::USER_AGENT, ua);
-        }
-        for (k, v) in extra_headers {
-            req = req.header(*k, *v);
-        }
+        let res = tokio::task::spawn_blocking(move || {
+            let hdrs: Vec<(&str, &str)> = headers_owned
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            pcc_curl(&url_owned, "GET", &token, None, &hdrs, ua_owned.as_deref())
+        })
+        .await;
 
-        match req.send().await {
-            Ok(r) => {
-                let status = r.status();
-                let body = String::from_utf8_lossy(&r.bytes().await.unwrap_or_default()).to_string();
+        match res {
+            Ok(Ok((status, body))) => {
                 let err = if body.contains("appVersion") {
                     "appVersionValidation".to_string()
                 } else if body.len() > 100 {
@@ -488,9 +533,10 @@ impl SwissPostcardCreatorApi {
                 } else {
                     body
                 };
-                (label.to_string(), status.to_string(), err)
+                (label.to_string(), format!("{status}"), err)
             }
-            Err(e) => (label.to_string(), "ERR".to_string(), e.to_string()),
+            Ok(Err(e)) => (label.to_string(), "ERR".to_string(), e.to_string()),
+            Err(e) => (label.to_string(), "PANIC".to_string(), e.to_string()),
         }
     }
 }

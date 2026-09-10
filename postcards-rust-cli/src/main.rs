@@ -77,11 +77,8 @@ async fn pcc_api() -> anyhow::Result<SwissPostcardCreatorApi> {
     let mut api = SwissPostcardCreatorApi::new();
     let username = std::env::var("PCD_USERNAME").unwrap_or_default();
     let password = std::env::var("PCD_PASSWORD").unwrap_or_default();
-    if !username.is_empty() && !password.is_empty() {
-        tracing::info!("authenticating PCC as {username} (cache-first)");
-        api.ensure_token(&username, &password).await?;
-        set_addresses(&mut api);
-    }
+    api.ensure_token(&username, &password).await?;
+    set_addresses(&mut api);
     Ok(api)
 }
 
@@ -106,7 +103,7 @@ async fn do_quota() -> anyhow::Result<()> {
     let api = pcc_api().await?;
     let quota = api.get_quota().await?;
     println!(
-        "quota={} available={} next={:?} end={}",
+        "quota={} available={} next={:?} end={:?}",
         quota.quota,
         quota.available,
         quota.next,
@@ -129,7 +126,12 @@ async fn do_user() -> anyhow::Result<()> {
     let user = api.get_user_information().await?;
     println!(
         "name={} first={} company={} street={} zip={} city={}",
-        user.name, user.first_name, user.company, user.street, user.zip, user.city
+        user.name,
+        user.first_name,
+        user.company.as_deref().unwrap_or(""),
+        user.street,
+        user.zip,
+        user.city
     );
     Ok(())
 }

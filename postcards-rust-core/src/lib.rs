@@ -30,3 +30,6 @@ pub const PCC_API_BASE: &str = "https://pccweb.api.post.ch/secure/api/mobile/v1"
 /// calls that don't present an app version; the real `ch.post.it.pcc` app sends
 /// it (version 4.38.1.0 as of Sep 2026).
 pub const PCC_APP_VERSION: &str = "4.38.1.0";
+
+/// PCC mobile app OS identifier sent alongside `PCCApp-Version`.
+pub const PCC_APP_OS: &str = "Android";

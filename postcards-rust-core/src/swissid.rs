@@ -344,7 +344,7 @@ impl SwissIdLoginService {
         let mut next_action_type = String::new();
         let mut auth_id = String::new();
         let mut last_basic_err = String::new();
-        for attempt in 1..=3u32 {
+        for attempt in 1..=6u32 {
             if attempt > 1 {
                 std::thread::sleep(Duration::from_millis(500));
             }
@@ -384,11 +384,16 @@ impl SwissIdLoginService {
                     break;
                 }
             }
+            if rb.body.contains("NEW_OTP_NOT_ALLOWED_CODE") {
+                tracing::info!(attempt, "SwissID OTP cooldown in effect, waiting 15s before retrying basic auth...");
+                std::thread::sleep(Duration::from_secs(15));
+                continue;
+            }
             last_basic_err = format!("basic failed: status={} body={}", rb.status, rb.body);
             tracing::warn!(attempt, "basic auth attempt failed: {last_basic_err}");
         }
         if next_action_type.is_empty() {
-            anyhow::bail!("Next action type not found after 3 attempts: {last_basic_err}");
+            anyhow::bail!("Next action type not found after attempts: {last_basic_err}");
         }
 
         // 4. Two-factor.
@@ -416,28 +421,39 @@ impl SwissIdLoginService {
             }
             tracing::debug!(next_action_type = %current, "2FA wait done");
         } else if next_action_type == "AUTHENTICATE_MTAN" {
-            let code = read_mtan_code()?;
-            tracing::debug!("submitting MTAN code");
-            let mtan_url = format!("{SWISSID_BASE}/authenticate/mtan?{url_query}");
-            let body = serde_json::json!({ "code": code }).to_string();
-            let (rm, _) = follow(
-                &mut jar,
-                &mtan_url,
-                "POST",
-                Some(&body),
-                &[("authId", auth_id.as_str()), ("Content-Type", "application/json")],
-                3,
-            );
-            tracing::debug!(status = rm.status, "MTAN submit");
-            std::fs::write("/tmp/e2e_mtan.json", rm.body.as_str()).ok();
-            tracing::debug!(mtan_body = %rm.body.chars().take(400).collect::<String>(), "MTAN response");
-            let parsed: Option<serde_json::Value> = serde_json::from_str(&rm.body).ok();
-            if let Some(v) = parsed {
-                if let Some(a) = v["tokens"]["authId"].as_str() {
+            loop {
+                let code = read_mtan_code()?;
+                tracing::debug!("submitting MTAN code");
+                let mtan_url = format!("{SWISSID_BASE}/authenticate/mtan?{url_query}");
+                let body = serde_json::json!({ "code": code }).to_string();
+                let (rm, _) = follow(
+                    &mut jar,
+                    &mtan_url,
+                    "POST",
+                    Some(&body),
+                    &[("authId", auth_id.as_str()), ("Content-Type", "application/json")],
+                    3,
+                );
+                tracing::debug!(status = rm.status, "MTAN submit");
+                std::fs::write("/tmp/e2e_mtan.json", rm.body.as_str()).ok();
+                tracing::debug!(mtan_body = %rm.body.chars().take(400).collect::<String>(), "MTAN response");
+                let v: serde_json::Value = serde_json::from_str(&rm.body)
+                    .map_err(|e| anyhow::anyhow!("failed to parse MTAN response JSON: {e}, body: {}", rm.body))?;
+
+                if let Some(a) = v["tokens"]["authId"].as_str().or_else(|| v["authId"].as_str()) {
                     auth_id = a.to_string();
                 }
-                let after = v["nextAction"]["type"].as_str().unwrap_or("(none)").to_string();
-                tracing::debug!(next_action_type = %after, "after MTAN");
+
+                if rm.status == 200 {
+                    let after = v["nextAction"]["type"].as_str().unwrap_or("(none)").to_string();
+                    tracing::debug!(next_action_type = %after, "after MTAN");
+                    break;
+                } else if v["errorCode"].as_str() == Some("INVALID_MTAN_CODE") {
+                    tracing::warn!("Invalid 2FA MTAN code. Waiting for fresh code in /tmp/pcd_2fa_code...");
+                    continue;
+                } else {
+                    anyhow::bail!("MTAN submission failed: status={} body={}", rm.status, rm.body);
+                }
             }
         } else {
             tracing::warn!("unexpected next action type: {next_action_type}");
@@ -454,10 +470,14 @@ impl SwissIdLoginService {
             &[("authId", auth_id.as_str()), ("Content-Type", "application/json")],
             3,
         );
-        let v: serde_json::Value = serde_json::from_str(&ra.body)?;
+        if ra.status < 200 || ra.status >= 300 {
+            anyhow::bail!("anomaly detection failed: status={} body={}", ra.status, ra.body);
+        }
+        let v: serde_json::Value = serde_json::from_str(&ra.body)
+            .map_err(|e| anyhow::anyhow!("failed to parse anomaly detection response: {e}, body: {}", ra.body))?;
         let next_url = v["nextAction"]["successUrl"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("SuccessUrl not found"))?
+            .ok_or_else(|| anyhow::anyhow!("SuccessUrl not found in anomaly response: {}", ra.body))?
             .to_string();
         tracing::debug!(next_url = %next_url, "anomaly -> successUrl");
         std::fs::write("/tmp/e2e_anomaly.json", ra.body.as_str()).ok();
@@ -638,7 +658,11 @@ impl SwissIdLoginService {
             &[("Content-Type", "application/x-www-form-urlencoded")],
             2,
         );
-        let token_object: serde_json::Value = serde_json::from_str(&r.body)?;
+        if r.status != 200 {
+            anyhow::bail!("token refresh failed: status={} body={}", r.status, r.body);
+        }
+        let token_object: serde_json::Value = serde_json::from_str(&r.body)
+            .map_err(|e| anyhow::anyhow!("failed to parse token JSON: {e}, body: {}", r.body))?;
         set_token(&token_object)
     }
 }
@@ -691,6 +715,7 @@ fn read_mtan_code() -> anyhow::Result<String> {
         if let Ok(c) = std::fs::read_to_string(&path) {
             let c = c.trim().to_string();
             if !c.is_empty() {
+                let _ = std::fs::remove_file(&path);
                 tracing::info!("read 2FA code from {path}");
                 return Ok(c);
             }

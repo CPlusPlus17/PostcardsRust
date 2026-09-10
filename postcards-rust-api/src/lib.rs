@@ -19,9 +19,25 @@ fn token_cache_path() -> std::path::PathBuf {
 
 fn load_cached_token() -> Option<Token> {
     let path = token_cache_path();
-    let s = std::fs::read_to_string(path).ok()?;
-    let t: Token = serde_json::from_str(&s).ok()?;
-    Some(t)
+    let s = std::fs::read_to_string(&path).ok()?;
+    if let Ok(t) = serde_json::from_str::<Token>(&s) {
+        return Some(t);
+    }
+    let v: serde_json::Value = serde_json::from_str(&s).ok()?;
+    let access_token = v["access_token"].as_str()?.to_string();
+    let refresh_token = v["refresh_token"].as_str()?.to_string();
+    let expires_in = v["expires_in"].as_u64().unwrap_or(300);
+    let mtime = std::fs::metadata(&path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map(chrono::DateTime::<chrono::Utc>::from)
+        .unwrap_or_else(chrono::Utc::now);
+    Some(Token {
+        access_token,
+        refresh_token,
+        expires_in_seconds: expires_in,
+        expires_at: mtime + chrono::Duration::seconds(expires_in as i64),
+    })
 }
 
 fn save_token(token: &Token) {
@@ -72,6 +88,9 @@ impl SwissPostcardCreatorApi {
                 self.get_token_expires_at().map(|t| t.to_rfc3339()).unwrap_or_default()
             );
             return Ok(());
+        }
+        if username.is_empty() || password.is_empty() {
+            anyhow::bail!("no valid cached PCC token and PCD_USERNAME / PCD_PASSWORD not set");
         }
         tracing::info!("no usable cached token - doing full SwissId login");
         self.login(username, password).await
