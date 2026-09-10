@@ -36,6 +36,8 @@ enum Command {
     Balance,
     /// Show PCC account information
     User,
+    /// Probe which app-version header/param the API accepts (one login).
+    Probe,
     /// Run forever: periodic sync + daily send (default behavior)
     Daemon,
 }
@@ -59,6 +61,7 @@ fn main() -> anyhow::Result<()> {
         Command::Quota => rt.block_on(do_quota())?,
         Command::Balance => rt.block_on(do_balance())?,
         Command::User => rt.block_on(do_user())?,
+        Command::Probe => rt.block_on(do_probe())?,
         Command::Daemon => rt.block_on(daemon(plugin()?))?,
     }
     Ok(())
@@ -75,8 +78,8 @@ async fn pcc_api() -> anyhow::Result<SwissPostcardCreatorApi> {
     let username = std::env::var("PCD_USERNAME").unwrap_or_default();
     let password = std::env::var("PCD_PASSWORD").unwrap_or_default();
     if !username.is_empty() && !password.is_empty() {
-        tracing::info!("logging into PCC as {username}");
-        api.login(&username, &password).await?;
+        tracing::info!("authenticating PCC as {username} (cache-first)");
+        api.ensure_token(&username, &password).await?;
         set_addresses(&mut api);
     }
     Ok(api)
@@ -128,6 +131,17 @@ async fn do_user() -> anyhow::Result<()> {
         "name={} first={} company={} street={} zip={} city={}",
         user.name, user.first_name, user.company, user.street, user.zip, user.city
     );
+    Ok(())
+}
+
+/// Probe: one login, then test candidate app-version transports against /user/quota.
+async fn do_probe() -> anyhow::Result<()> {
+    let api = pcc_api().await?;
+    let version = std::env::var("PCD_APP_VERSION").unwrap_or_else(|_| "4.38.1.0".to_string());
+    let results = api.probe_app_version(&version).await?;
+    for (label, status, err) in results {
+        println!("{label:40} -> {status}  {err}");
+    }
     Ok(())
 }
 

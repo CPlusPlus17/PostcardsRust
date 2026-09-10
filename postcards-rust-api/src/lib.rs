@@ -2,11 +2,38 @@
 //!
 //! Combines a token service (SwissId login) with the PCC REST API.
 pub use postcards_rust_core::types::{
-    Balance, PostcardCreatorQuota, PostcardCreatorUser, RecipientAddress, SenderAddress,
+    Balance, PostcardCreatorQuota, PostcardCreatorUser, RecipientAddress, SenderAddress, Token,
 };
 use postcards_rust_core::types::SwissPostcardCreatorApi as CoreApi;
 use postcards_rust_core::swissid::{SwissIdLoginService, TokenService as _};
-use postcards_rust_core::Token;
+
+/// On-disk token cache so one login (one 2FA) can be reused across many runs.
+fn token_cache_path() -> std::path::PathBuf {
+    let mut p = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    p.push(".postcards_rust");
+    p.push("token.json");
+    p
+}
+
+fn load_cached_token() -> Option<Token> {
+    let path = token_cache_path();
+    let s = std::fs::read_to_string(path).ok()?;
+    let t: Token = serde_json::from_str(&s).ok()?;
+    Some(t)
+}
+
+fn save_token(token: &Token) {
+    let path = token_cache_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(s) = serde_json::to_string_pretty(token) {
+        let _ = std::fs::write(&path, s);
+        let _ = std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
+    }
+}
 
 /// High-level Postcard Creator API with SwissId login.
 #[derive(Debug, Default)]
@@ -30,8 +57,46 @@ impl SwissPostcardCreatorApi {
     pub async fn login(&mut self, username: &str, password: &str) -> anyhow::Result<()> {
         let token = self.token_service.get_token(username, password).await?;
         self.set_access_token(token.access_token.clone());
-        self.token = Some(token);
+        self.token = Some(token.clone());
+        save_token(&token);
         Ok(())
+    }
+
+    /// Cache-first: use a valid cached token (refreshing if needed), else do a full
+    /// login. This is what the CLI calls — one 2FA covers many runs.
+    pub async fn ensure_token(&mut self, username: &str, password: &str) -> anyhow::Result<()> {
+        if let Some(tok) = self.token_from_cache().await {
+            self.set_access_token(tok.access_token.clone());
+            tracing::info!(
+                "using cached PCC token (expires_at={})",
+                self.get_token_expires_at().map(|t| t.to_rfc3339()).unwrap_or_default()
+            );
+            return Ok(());
+        }
+        tracing::info!("no usable cached token - doing full SwissId login");
+        self.login(username, password).await
+    }
+
+    /// Try the on-disk token cache; if expired, attempt a refresh. `None` if the
+    /// caller must do a full login.
+    async fn token_from_cache(&mut self) -> Option<Token> {
+        let tok = load_cached_token()?;
+        let now = chrono::Utc::now();
+        if now < tok.expires_at - chrono::Duration::minutes(1) {
+            self.token = Some(tok.clone());
+            return Some(tok);
+        }
+        match self.token_service.refresh_token(&tok.refresh_token).await {
+            Ok(t) => {
+                self.token = Some(t.clone());
+                save_token(&t);
+                Some(t)
+            }
+            Err(e) => {
+                tracing::info!("cached token refresh failed: {e}");
+                None
+            }
+        }
     }
 
     /// Refresh token after login.
@@ -45,7 +110,8 @@ impl SwissPostcardCreatorApi {
             .refresh_token(&token.refresh_token)
             .await?;
         self.set_access_token(token.access_token.clone());
-        self.token = Some(token);
+        self.token = Some(token.clone());
+        save_token(&token);
         Ok(())
     }
 
@@ -103,5 +169,10 @@ impl SwissPostcardCreatorApi {
     /// Get date and time when next free card can be sent.
     pub async fn next_free_card_available_at(&self) -> anyhow::Result<Option<chrono::DateTime<chrono::Utc>>> {
         self.core.next_free_card_available_at().await
+    }
+
+    /// Probe which app-version transport the PCC API accepts (one login).
+    pub async fn probe_app_version(&self, version: &str) -> anyhow::Result<Vec<(String, String, String)>> {
+        self.core.probe_app_version(version).await
     }
 }

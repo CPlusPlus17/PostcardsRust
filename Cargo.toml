@@ -28,12 +28,16 @@ tokio = { version = "1", features = ["full"] }
 
 # http
 reqwest = { version = "0.12", default-features = false, features = [
-    "rustls-tls",
+    "native-tls",
     "cookies",
     "json",
     "gzip",
     "multipart",
 ] }
+# curl crate: linked against the SYSTEM libcurl 8.18 (via PKG_CONFIG shim)
+# because its ClientHello passes the swissid WAF. reqwest (native-tls/rustls)
+# is reset mid-handshake. See postcards-rust-core/src/swissid.rs.
+curl = "0.4"
 url = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

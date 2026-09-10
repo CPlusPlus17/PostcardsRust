@@ -22,5 +22,11 @@ pub const CLIENT_ID: &str = "ae9b9894f8728ca78800942cda638155";
 /// PostCardApp client secret.
 pub const CLIENT_SECRET: &str = "89ff451ede545c3f408d792e8caaddf0";
 
-/// PCC REST API base URL.
-pub const PCC_API_BASE: &str = "https://pccweb.api.post.ch/secure/api/mobile/v1/";
+/// PCC REST API base URL. No trailing slash: call sites append `/{endpoint}`,
+/// and a double slash (`v1//user/quota`) is 400'd by the API.
+pub const PCC_API_BASE: &str = "https://pccweb.api.post.ch/secure/api/mobile/v1";
+
+/// PCC mobile app version. The API's `appVersionValidation` gate rejects quota
+/// calls that don't present an app version; the real `ch.post.it.pcc` app sends
+/// it (version 4.38.1.0 as of Sep 2026).
+pub const PCC_APP_VERSION: &str = "4.38.1.0";
