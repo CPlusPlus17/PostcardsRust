@@ -5,6 +5,7 @@ members = [
     "postcards-rust-api",
     "postcards-rust-plugin-base",
     "postcards-rust-plugin-google-photos",
+    "postcards-rust-plugin-immich",
     "postcards-rust-cli",
 ]
 
@@ -22,6 +23,7 @@ postcards-rust-core = { path = "postcards-rust-core" }
 postcards-rust-api = { path = "postcards-rust-api" }
 postcards-rust-plugin-base = { path = "postcards-rust-plugin-base" }
 postcards-rust-plugin-google-photos = { path = "postcards-rust-plugin-google-photos" }
+postcards-rust-plugin-immich = { path = "postcards-rust-plugin-immich" }
 
 # async
 tokio = { version = "1", features = ["full"] }
@@ -44,7 +46,7 @@ serde_json = "1"
 ureq = { version = "2", default-features = false, features = ["rustls"] }
 
 # image
-image = { version = "0.25", features = ["jpeg", "png"] }
+image = { version = "0.25", features = ["jpeg", "png", "webp"] }
 base64 = "0.22"
 
 # crypto / misc

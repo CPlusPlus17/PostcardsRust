@@ -409,4 +409,22 @@ impl ICommand for GooglePhotoCommand {
         std::fs::remove_file(path_to_photo)?;
         Ok(())
     }
+
+    async fn list_albums(&self) -> anyhow::Result<Vec<postcards_rust_plugin_base::AlbumSummary>> {
+        let mut clone = self.clone();
+        clone.ensure_token().await?;
+        let token = clone
+            .access_token
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("not logged in"))?;
+        let albums = self.list_albums(token).await?;
+        Ok(albums
+            .into_iter()
+            .map(|a| postcards_rust_plugin_base::AlbumSummary {
+                id: a.id,
+                name: a.title,
+                asset_count: 0,
+            })
+            .collect())
+    }
 }

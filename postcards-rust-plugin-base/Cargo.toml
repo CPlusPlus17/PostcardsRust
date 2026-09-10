@@ -6,3 +6,4 @@ description = "Plugin command trait for PostcardsRust (port of PluginBase.IComma
 [dependencies]
 async-trait = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }

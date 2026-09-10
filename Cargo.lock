@@ -1584,11 +1584,16 @@ name = "postcards-rust-cli"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
+ "dirs",
  "postcards-rust-api",
  "postcards-rust-core",
  "postcards-rust-plugin-base",
  "postcards-rust-plugin-google-photos",
+ "postcards-rust-plugin-immich",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1622,6 +1627,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "serde",
 ]
 
 [[package]]
@@ -1639,6 +1645,22 @@ dependencies = [
  "tokio",
  "tracing",
  "urlencoding",
+]
+
+[[package]]
+name = "postcards-rust-plugin-immich"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "dirs",
+ "postcards-rust-plugin-base",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
