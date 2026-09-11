@@ -1,63 +1,85 @@
 # PostcardsRust
 
-Rust implementation of [PostcardsDotnet](https://github.com/CPlusPlus17/PostcardsDotnet)
-(a .NET port of [abertschi/postcards](https://github.com/abertschi/postcards)).
+Automated Swiss Postcard Creator CLI & daemon in Rust. Synchronizes photos from a self-hosted **Immich** album (or **Google Photos**), formats and scales them to Swiss Post specifications, and sends genuine physical postcards via the [Swiss Post Postcard Creator](https://postcardcreator.post.ch) API.
 
-Syncs photos from a Google Photos album and automatically sends them as
-digital postcards through the [Swiss Post Postcard Creator](https://postcardcreator.post.ch).
+When using **Immich**, sent photos are **automatically removed from the sending album** (while remaining safely in your Immich photo library) so you can continuously queue up cards and let the daemon send them automatically.
 
-## Why a Rust fork
+---
 
-- Single static binary (release: ~10 MB) instead of a .NET runtime
-- `async`/`tokio` for the login + API flows
-- Same environment variables as the .NET CLI, so existing setups keep working
-- Workspace layout mirrors the .NET solution (core / api / plugin-base / google-photos / cli)
+## Key Features
 
-## Crates
+- **📸 Photo Backend Plugins**:
+  - **Immich (Recommended)**: Resolves albums by name or UUID, downloads original photos, and automatically unlinks sent photos from the album upon delivery confirmation (`DELETE /api/albums/{id}/assets`).
+  - **Google Photos**: Syncs photos from designated Google Photos albums into a local cache.
+- **📮 Swiss Post API (PCC)**:
+  - Reverse-engineered against official PostCard Creator APK `ch.post.it.pcc` (v4.38.1.0).
+  - Passes Swiss Post's `appVersionValidation` gate (`PCCApp-Version: 4.38.1.0`, `PCCApp-OS: Android`).
+  - Automated SwissID OAuth flow with cache-first token reuse in `~/.postcards_rust/token.json` (no repeated 2FA prompts).
+- **⏱️ 7-Day Cooldown & State Tracking**:
+  - Automatically respects the Swiss Post 7-day free card retention cooldown.
+  - Persistent state in `~/.postcards_rust/state.json` survives restarts and upgrades.
+  - Interactive countdowns in `postcards-rust quota` and `--force` override option in `send`.
+- **🚀 Flexible Deployment**:
+  - Single static binary CLI & daemon.
+  - Multi-stage minimal Dockerfile (`debian:bookworm-slim`, non-root user).
+  - Production-ready Kubernetes **Helm Chart** supporting both `daemon` (Deployment) and `cronjob` (Kubernetes CronJob) modes with persistent PVC storage and zero-2FA token seeding.
 
-| crate | .NET counterpart | purpose |
+---
+
+## Crates Overview
+
+| Crate | Counterpart | Purpose |
 |---|---|---|
-| `postcards-rust-core` | `PostcardsDotnet.Common` + `.Services` + `.Contracts` + `.Data.*` | SwissId login, PCC REST API, image scaling |
-| `postcards-rust-api` | `PostcardsDotnet.API` | `SwissPostcardCreatorApi` facade (login, send, quota, balance, user) |
-| `postcards-rust-plugin-base` | `PostcardsDotnet.PluginBase` | `ICommand` plugin trait, `AlbumSummary` |
-| `postcards-rust-plugin-immich` | New | Immich album sync & automatic post-send unlinking |
-| `postcards-rust-plugin-google-photos` | `PostcardsDotnet.PluginGooglePhotos` | Google Photos album sync |
-| `postcards-rust-cli` | `PostcardsDotnet.Cli` | CLI + automation daemon + cooldown tracking |
+| `postcards-rust-core` | `PostcardsDotnet.Common` / `Services` | SwissID OAuth, PCC REST API client, image scaling |
+| `postcards-rust-api` | `PostcardsDotnet.API` | High-level facade with automatic token caching & refresh |
+| `postcards-rust-plugin-base` | `PostcardsDotnet.PluginBase` | `ICommand` trait, `AlbumSummary` model |
+| `postcards-rust-plugin-immich` | New | Immich API client, album sync, and post-send unlinking |
+| `postcards-rust-plugin-google-photos` | `PostcardsDotnet.PluginGooglePhotos` | Google Photos album synchronization |
+| `postcards-rust-cli` | `PostcardsDotnet.Cli` | CLI application, automation daemon, cooldown manager |
 
-## Build
+---
 
+## Building Locally
+
+### Prerequisites
+- Rust 1.85+ / 1.97
+- OpenSSL & system `libcurl` 8.x development packages:
+  - **Debian / Ubuntu**: `sudo apt install libssl-dev libcurl4-openssl-dev pkg-config`
+  - **Fedora / RHEL**: `sudo dnf install openssl-devel libcurl-devel pkg-config`
+
+### Build & Test
 ```sh
 cargo build --release
 cargo test --workspace
 ```
 
-## Photo Backends (Plugins)
+> **Note on system libcurl**:
+> SwissID's Cloudflare / WAF validates TLS ClientHello fingerprints. The `curl` crate links against system `libcurl` to ensure successful handshakes. If you have custom library paths, prepend `LD_LIBRARY_PATH`:
+> ```sh
+> export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+> ```
 
-### 1. Immich (Recommended)
+---
 
-Connects to your self-hosted Immich instance, synchronizes photos from a chosen album (e.g. "Postcards"), sends the oldest photo, and **automatically removes the sent photo from the album** (without deleting it from your library).
+## Configuration
 
-Configure via CLI flags, environment variables, or `~/.postcards_rust/config.json`:
+PostcardsRust supports configuration via:
+1. **JSON Configuration File** (`~/.postcards_rust/config.json` or `--config <path>`)
+2. **Environment Variables**
+3. **CLI Arguments & Flags**
 
-```sh
-# Immich Environment Variables
-export IMMICH_INSTANCE_URL="https://photos.example.com"
-export IMMICH_API_KEY="your-api-key-here"
-export IMMICH_ALBUM="Postcards"  # album name or UUID
-# export IMMICH_INSECURE_TLS=true  # optional, for self-signed certificates
-```
-
-Or JSON config file (`~/.postcards_rust/config.json`):
+### Recommended: `~/.postcards_rust/config.json`
 
 ```json
 {
   "plugin": "immich",
   "cooldown_days": 7,
-  "default_message": "Sent automatically from Immich!",
+  "default_message": "Automated postcard greeting!",
   "immich": {
-    "instance_url": "https://photos.example.com",
-    "api_key": "your-api-key-here",
-    "album": "Postcards"
+    "instance_url": "https://photos.yourdomain.com",
+    "api_key": "YOUR_IMMICH_API_KEY",
+    "album": "Postcards",
+    "insecure_tls": false
   },
   "sender": {
     "first_name": "Max",
@@ -71,84 +93,210 @@ Or JSON config file (`~/.postcards_rust/config.json`):
     "last_name": "Muster",
     "street": "Musterstrasse 1",
     "zip": "3000",
-    "city": "Bern"
+    "city": "Bern",
+    "country": "SWITZERLAND"
   }
 }
 ```
 
-### 2. Google Photos
+### Environment Variables Reference
 
-Reads the same env vars as the legacy .NET implementation:
-
+#### Immich Backend
 ```sh
-export GPSC_USER=you@example.com
-export GPSC_CLIENTID=<google client id>
-export GPSC_CLIENTSECRET=<google client secret>
-export GPSC_MEDIAFOLDERPATH=/var/lib/postcards/media
-export GPSC_ALBUMSTOSYNC="My Album,Other Album"
-export GPSC_SYNCEDIDSFILEPATH=/var/lib/postcards/synced_ids.txt
-export GPSC_CONFIGPATH=/var/lib/postcards/google_token.json
+export IMMICH_INSTANCE_URL="https://photos.yourdomain.com"
+export IMMICH_API_KEY="your-api-key"
+export IMMICH_ALBUM="Postcards"           # Album name or UUID
+# export IMMICH_MEDIA_FOLDER=~/.postcards_rust/immich_photos # Custom cache folder
+# export IMMICH_INSECURE_TLS=true         # Set true for self-signed certificates
 ```
 
-## PCC Configuration (Swiss Post)
-
-Cached tokens in `~/.postcards_rust/token.json` are reused automatically across runs. To log in initially:
-
+#### Swiss Post (PCC) Credentials
 ```sh
-export PCD_USERNAME=<swissid login>
-export PCD_PASSWORD=<password>
+export PCD_USERNAME="your-swissid-email"
+export PCD_PASSWORD="your-swissid-password"
 ```
 
-## CLI Subcommands
+#### Sender & Recipient (if not using config.json)
+```sh
+export PCD_SENDERFIRSTNAME="Max"
+export PCD_SENDERLASTNAME="Muster"
+export PCD_SENDERSTREET="Bahnhofstrasse 10"
+export PCD_SENDERZIP="8001"
+export PCD_SENDERCITY="Zürich"
+
+export PCD_RECIPIENTFIRSTNAME="Grandma"
+export PCD_RECIPIENTLASTNAME="Muster"
+export PCD_RECIPIENTSTREET="Musterstrasse 1"
+export PCD_RECIPIENTZIP="3000"
+export PCD_RECIPIENTCITY="Bern"
+export PCD_RECIPIENTCOUNTRY="SWITZERLAND"
+```
+
+---
+
+## CLI Usage
 
 ```
-postcards-rust sync     # Sync new photos from the configured backend album into local cache
-postcards-rust send     # Send the next photo as a postcard (respects cooldown, --force to bypass)
-postcards-rust daemon   # Run automation daemon: periodic sync + scheduled sending with cooldown
-postcards-rust quota    # Show Swiss Post quota and automation cooldown status
-postcards-rust albums   # List all available albums on your Immich instance
-postcards-rust balance  # Show PCC account balance
-postcards-rust user     # Show PCC account information
+Automate Swiss Postcard Creator with photo backends (Immich, Google Photos)
+
+Usage: postcards-rust [OPTIONS] [COMMAND]
+
+Commands:
+  sync     Sync new photos from the configured backend album into local cache
+  send     Send the next cached photo as a postcard (respects cooldown unless --force)
+  daemon   Run automation daemon: periodic sync + scheduled postcard sending with cooldown
+  quota    Show Swiss Post quota and local automation cooldown status
+  albums   List available albums in the photo backend
+  balance  Show PCC account balance
+  user     Show PCC account information
+  probe    Probe which app-version header/param the API accepts (one login)
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -p, --plugin <PLUGIN>             Photo backend plugin to use: "immich" or "google-photos"
+      --immich-url <URL>            Immich instance base URL [env: IMMICH_INSTANCE_URL]
+      --immich-api-key <KEY>        Immich API key [env: IMMICH_API_KEY]
+      --immich-album <ALBUM>        Immich album name or UUID [env: IMMICH_ALBUM]
+      --media-folder <DIR>          Custom media cache folder [env: IMMICH_MEDIA_FOLDER]
+      --insecure-tls                Allow self-signed or invalid SSL certificates
+      --config <PATH>               Path to custom config JSON file
+  -h, --help                        Print help
+  -V, --version                     Print version
 ```
 
-### Automation & 7-Day Cooldown
+### Examples
 
-- Swiss Post free cards have a cooldown retention period (typically 7 days).
-- PostcardsRust enforces this cooldown in `send` and automatically schedules the next send in `daemon`.
-- State is persisted in `~/.postcards_rust/state.json`.
-- Override at any time with `postcards-rust send --force`.
+#### Check remaining quota and cooldown
+```sh
+postcards-rust quota
+```
+*Output:*
+```
+=== Swiss Post Quota ===
+  Quota:            -1
+  Available Now:    Yes
+  API Next Card:    Immediately
+  Quota Valid End:  2027-09-10T21:14:57+00:00
+  Retention Days:   7
 
-### One-time Google Photos login
+=== Automation Cooldown Status ===
+  Configured Interval:  7 days
+  Total Cards Sent:     0
+  Last Photo Sent:      None
+  Last Card Sent At:    Never
+  Cooldown Active:      NO (Ready to send)
+  Next Eligible Send:   Ready now
+```
 
-If `GPSC_CONFIGPATH` does not contain a token yet, `login` prints an
-authorization URL. Open it in a browser, grant access, and paste the code
-back. The refresh token is stored in `GPSC_CONFIGPATH` and reused on
-subsequent runs (no browser needed afterwards).
+#### List available albums on Immich
+```sh
+postcards-rust albums
+```
 
-## How the login works (SwissId)
+#### Send the next postcard
+Respects the 7-day cooldown. To send immediately:
+```sh
+postcards-rust send --force
+```
 
-Ported 1:1 from the .NET `SwissIdLoginService`:
+#### Run the hands-off automation daemon
+Checks for new photos, respects the 7-day cooldown and quota availability, sends the oldest card, unlinks it from the album, and sleeps until the next eligible window:
+```sh
+postcards-rust daemon --cooldown-days 7 --sync-minutes 60
+```
 
-1. `pccweb.api.post.ch/OAuth/authorization` — seed cookies (PKCE `code_challenge`)
-2. `account.post.ch/idp/?login` — extract the `goto` parameter
-3. `login.swissid.ch/api-login/...` — `token/status`, `welcome-pack`, `authenticate/init` (authId), `authenticate/basic`
-4. poll `authenticate/swiss-id-app/status` while 2FA (SwissId app push) is pending
-5. `anomaly-detection/device-print` — get the next URL
-6. follow the URL, extract `SAMLResponse` + `RelayState`
-7. `pccweb.api.post.ch/OAuth/` (code) → `/OAuth/token` (access + refresh token)
+---
 
-Tokens are refreshed automatically before expiry when sending.
+## Docker Deployment
 
-## Image pipeline
+Build the container image:
+```sh
+docker build -t postcards-rust:latest .
+```
 
-The Postcard Creator requires 1819×1311. `image_helper` reproduces the
-ImageMagick pipeline of the .NET version:
+Run with persistent storage for tokens and state:
+```sh
+docker run -d \
+  --name postcards \
+  --restart unless-stopped \
+  -v $(pwd)/data:/data \
+  -e IMMICH_INSTANCE_URL="https://photos.yourdomain.com" \
+  -e IMMICH_API_KEY="your-api-key" \
+  -e IMMICH_ALBUM="Postcards" \
+  -e PCD_USERNAME="your-swissid-email" \
+  -e PCD_PASSWORD="your-password" \
+  postcards-rust:latest daemon
+```
 
-- portrait images are rotated 90°
-- scale to fill 1819×1311 (aspect preserved)
-- center-crop to exactly 1819×1311
-- encode JPEG (quality 92) → base64
+---
+
+## Kubernetes Helm Chart
+
+A complete Helm chart is provided in [`charts/postcards`](charts/postcards).
+
+### 1. Create a `values.yaml` file
+```yaml
+mode: daemon
+
+immich:
+  instanceUrl: "https://photos.yourdomain.com"
+  apiKey: "your-immich-api-key"
+  album: "Postcards"
+
+pcc:
+  username: "your-swissid-email"
+  password: "your-password"
+
+# Optional: Seed cached token from desktop (~/.postcards_rust/token.json)
+# to avoid entering SMS 2FA inside Kubernetes:
+# token:
+#   initialTokenJson: |
+#     {"access_token":"...","refresh_token":"...","expires_in_seconds":300,"expires_at":"..."}
+
+sender:
+  firstName: "Max"
+  lastName: "Muster"
+  street: "Bahnhofstrasse 10"
+  zip: "8001"
+  city: "Zürich"
+
+recipient:
+  firstName: "Grandma"
+  lastName: "Muster"
+  street: "Musterstrasse 1"
+  zip: "3000"
+  city: "Bern"
+  country: "SWITZERLAND"
+
+persistence:
+  enabled: true
+  size: 1Gi
+```
+
+### 2. Install the Chart
+```sh
+helm install postcards ./charts/postcards -f values.yaml
+```
+
+### 3. Check logs & status
+```sh
+kubectl logs -f deployment/postcards
+```
+
+See [`charts/postcards/README.md`](charts/postcards/README.md) for full configuration parameters.
+
+---
+
+## Image Scaling Pipeline
+
+Swiss Post requires uploaded images to be formatted at **1819×1311 pixels**. The built-in image processor:
+1. Detects portrait images (width < height) and rotates them 90°.
+2. Scales the image preserving aspect ratio with **Lanczos3** filtering.
+3. Center-crops to exactly 1819×1311.
+4. Encodes as high-quality JPEG (quality 92) and base64-encodes for the upload payload.
+
+---
 
 ## License
 
-MIT (see `Cargo.toml`).
+MIT License. See [`Cargo.toml`](Cargo.toml) for details.
