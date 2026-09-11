@@ -110,6 +110,15 @@ export IMMICH_ALBUM="Postcards"           # Album name or UUID
 # export IMMICH_INSECURE_TLS=true         # Set true for self-signed certificates
 ```
 
+#### Immich API Key Permissions
+When generating an API Key in Immich (**Account Settings** → **API Keys**):
+- **Full Access** *(Recommended)*: Simplest setup if your Immich deployment does not require fine-grained scoping.
+- **Scoped Permissions**: If using restricted permissions, ensure the API key includes the following scopes:
+  - `asset.view` (or `asset.read`): Required to download high-resolution JPEG/WebP previews for HEIC/RAW assets. *(Without this, Immich returns `HTTP 403 Forbidden - Missing required permission: asset.view`)*
+  - `asset.download`: Required to download original photo assets.
+  - `album.read`: Required to list and inspect album contents.
+  - `album.deleteAsset`: Required to automatically unlink/remove sent photos from the album (`DELETE /api/albums/{id}/assets`).
+
 #### Swiss Post (PCC) Credentials
 ```sh
 export PCD_USERNAME="your-swissid-email"
@@ -284,6 +293,62 @@ kubectl logs -f deployment/postcards
 ```
 
 See [`charts/postcards/README.md`](charts/postcards/README.md) for full configuration parameters.
+
+---
+
+## SwissID 2FA Authentication & Token Setup
+
+Swiss Post authentication is managed through SwissID, which enforces an SMS 2FA code verification on initial login.
+
+### How Token Caching Works
+1. During the initial login, PostcardsRust completes the SwissID OAuth handshake and prompts you for the 6-digit SMS verification code.
+2. Upon entering the code, the resulting OAuth credentials (`access_token` and long-lived `refresh_token`) are automatically written to disk in `token.json` (`~/.postcards_rust/token.json` locally or `/data/.postcards_rust/token.json` in Docker/Kubernetes).
+3. PostcardsRust automatically refreshes the short-lived access token using the cached refresh token prior to sending. **You only need to enter the 2FA SMS code once** as long as `token.json` is preserved across restarts on persistent storage.
+
+---
+
+### How to Provide the 2FA Code
+
+#### Method 1: Interactive Docker Container (Recommended for Docker)
+Run a temporary interactive container with `-it` attached to complete the initial login:
+
+```sh
+docker run -it --rm \
+  -v $(pwd)/data:/data \
+  -e PCD_USERNAME="your-swissid-email" \
+  -e PCD_PASSWORD="your-swissid-password" \
+  ghcr.io/cplusplus17/postcardsrust:latest quota
+```
+
+1. Enter your SMS code when prompted on the terminal.
+2. The authenticated credentials will be saved to `$(pwd)/data/.postcards_rust/token.json`.
+3. Start your background daemon using the same `-v $(pwd)/data:/data` volume mount. It will read the cached token and run hands-off without ever prompting for 2FA again.
+
+---
+
+#### Method 2: Headless Kubernetes (Zero-2FA Token Seeding)
+If you run Kubernetes without interactive terminal access, seed the token from your desktop:
+
+1. Run `postcards-rust quota` once on your local machine to generate `~/.postcards_rust/token.json`.
+2. In your Helm `values.yaml`, paste the file's JSON contents into `token.initialTokenJson`:
+   ```yaml
+   token:
+     initialTokenJson: |
+       {"access_token":"...","refresh_token":"...","expires_in_seconds":300,"expires_at":"..."}
+   ```
+3. When the Helm chart is deployed, a Kubernetes init container automatically writes `token.json` into the PVC before the main daemon container boots.
+
+---
+
+#### Method 3: Live Kubernetes Terminal (`kubectl exec`)
+If your pod is already running in the cluster and waiting for credentials:
+
+```sh
+# Run an interactive command inside the running pod
+kubectl exec -it deployment/postcards -n postcards -- postcards-rust quota
+```
+
+Enter your SMS 2FA code in the interactive prompt. The token will be saved directly to the `/data/.postcards_rust/token.json` volume mount on the PVC, allowing the daemon to resume sending automatically.
 
 ---
 
