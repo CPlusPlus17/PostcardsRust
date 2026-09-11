@@ -43,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     ca-certificates \
     tzdata \
+    libheif-examples \
     && rm -rf /var/lib/apt/lists/*
 
 # Create dedicated non-root user and persistent directory

@@ -1655,6 +1655,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "dirs",
+ "image",
  "postcards-rust-plugin-base",
  "reqwest",
  "serde",

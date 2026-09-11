@@ -332,6 +332,8 @@ async fn do_daemon(
     sync_tick.tick().await; // skip initial tick
 
     let mut check_tick = tokio::time::interval(check_interval);
+    check_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    check_tick.tick().await; // skip initial tick since startup already checked
 
     loop {
         tokio::select! {
@@ -354,6 +356,8 @@ async fn do_daemon(
                                     let _ = plugin.sync().await;
                                     if let Err(e) = send_single_card(&mut *plugin, config, &message).await {
                                         tracing::warn!("Automated send failed: {e}");
+                                        // Backoff on failure to prevent rapid retry loops
+                                        tokio::time::sleep(check_interval).await;
                                     }
                                 }
                                 Ok(q) => {
