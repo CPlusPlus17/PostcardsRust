@@ -162,10 +162,10 @@ fn one(jar: &CookieJar, url: &str, method: &str, body: Option<&str>, extra: &[(&
             let s = String::from_utf8_lossy(h);
             let up = s.trim_start().to_ascii_uppercase();
             if up.starts_with("LOCATION:") {
-                let val = s.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
+                let val = s.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string();
                 *lb2.lock().unwrap() = val;
             } else if up.starts_with("SET-COOKIE:") {
-                let val = s.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
+                let val = s.split_once(':').map(|x| x.1).unwrap_or("").trim().to_string();
                 sc2.lock().unwrap().push(val);
             }
             true
@@ -399,7 +399,6 @@ impl SwissIdLoginService {
         // 4. Two-factor.
         //   - WAIT_FOR_ASYNC_SWISS_ID_APP_AUTHENTICATION: poll the app status.
         //   - AUTHENTICATE_MTAN: submit the mobile text code (POST /authenticate/mtan {code}).
-        let mut auth_id = auth_id;
         if next_action_type == "WAIT_FOR_ASYNC_SWISS_ID_APP_AUTHENTICATION" {
             let started = std::time::Instant::now();
             let mut current = next_action_type.clone();
@@ -562,7 +561,7 @@ impl SwissIdLoginService {
                 std::thread::sleep(Duration::from_millis(700));
             }
             let ro = one(
-                &mut jar,
+                &jar,
                 acs_url.as_str(),
                 "POST",
                 Some(&oauth_body),

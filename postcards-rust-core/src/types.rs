@@ -269,7 +269,7 @@ impl SwissPostcardCreatorApi {
             "quota response"
         );
         std::fs::write("/tmp/e2e_quota_resp.txt", format!("status={status}\n{txt}")).ok();
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             anyhow::bail!("quota failed: {status} {txt}");
         }
         let res: serde_json::Value = serde_json::from_str(&txt)?;
@@ -286,7 +286,7 @@ impl SwissPostcardCreatorApi {
         })
         .await??;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             anyhow::bail!("user info failed: {status} {txt}");
         }
         let res: serde_json::Value = serde_json::from_str(&txt)?;
@@ -303,7 +303,7 @@ impl SwissPostcardCreatorApi {
         })
         .await??;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             anyhow::bail!("balance failed: {status} {txt}");
         }
         let res: serde_json::Value = serde_json::from_str(&txt)?;
@@ -374,7 +374,7 @@ impl SwissPostcardCreatorApi {
         }
         let payload = parts[1];
         let mut padded = payload.to_string();
-        while padded.len() % 4 != 0 {
+        while !padded.len().is_multiple_of(4) {
             padded.push('=');
         }
         let decoded = base64::engine::general_purpose::URL_SAFE.decode(padded.as_bytes()).ok()?;
@@ -449,15 +449,15 @@ impl SwissPostcardCreatorApi {
 
         let user_agents = [
             format!("PostCard/{version} (Linux; Android 12)"),
-            format!("PostCard/4.38.1 (Linux; Android 12)"),
+            "PostCard/4.38.1 (Linux; Android 12)".to_string(),
             format!("PostCard/{version}"),
-            format!("PostCard/4.38.1"),
+            "PostCard/4.38.1".to_string(),
             format!("ch.post.it.pcc/{version}"),
-            format!("ch.post.it.pcc/4.38.1"),
+            "ch.post.it.pcc/4.38.1".to_string(),
             format!("PostCardCreator/{version}"),
-            format!("PostCardCreator/4.38.1"),
+            "PostCardCreator/4.38.1".to_string(),
             format!("PostCard {version} (Android)"),
-            format!("PostCard/4.38.1.0 (ch.post.it.pcc; Android 12; Pixel 6)"),
+            "PostCard/4.38.1.0 (ch.post.it.pcc; Android 12; Pixel 6)".to_string(),
             format!("{USER_AGENT} PostCard/{version}"),
             format!("{USER_AGENT} ch.post.it.pcc/{version}"),
             format!("Mozilla/5.0 (Android; Mobile; rv:100.0) Gecko/100.0 Firefox/100.0 PostCard/{version}"),
