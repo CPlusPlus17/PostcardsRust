@@ -2,7 +2,7 @@
 # This chart deploys PostcardsRust in daemon mode or cronjob mode.
 
 image:
-  repository: ghcr.io/cplusplus17/postcards-rust
+  repository: ghcr.io/cplusplus17/postcardsrust
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
