@@ -157,7 +157,7 @@ fn pcc_curl(
         list.append(&format!("Authorization: Bearer {}", access_token))?;
     }
     list.append("Accept: application/json")?;
-    list.append(&format!("PCCApp-Version: {}", super::PCC_APP_VERSION))?;
+    list.append(&format!("PCCApp-Version: {}", super::pcc_app_version()))?;
     list.append(&format!("PCCApp-OS: {}", super::PCC_APP_OS))?;
     for (k, v) in extra_headers {
         list.append(&format!("{k}: {v}"))?;

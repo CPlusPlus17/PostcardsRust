@@ -12,8 +12,8 @@ When using **Immich**, sent photos are **automatically removed from the sending 
   - **Immich (Recommended)**: Resolves albums by name or UUID, downloads original photos, and automatically unlinks sent photos from the album upon delivery confirmation (`DELETE /api/albums/{id}/assets`).
   - **Google Photos**: Syncs photos from designated Google Photos albums into a local cache.
 - **📮 Swiss Post API (PCC)**:
-  - Reverse-engineered against official PostCard Creator APK `ch.post.it.pcc` (v4.38.1.0).
-  - Passes Swiss Post's `appVersionValidation` gate (`PCCApp-Version: 4.38.1.0`, `PCCApp-OS: Android`).
+  - Reverse-engineered against official PostCard Creator APK `ch.post.it.pcc`.
+  - Passes Swiss Post's `appVersionValidation` gate (`PCCApp-Version: 4.40.0.0`, `PCCApp-OS: Android`). Swiss Post retires old app versions; when sends start failing with `appVersionValidation`, set `PCD_APP_VERSION` to the current Play Store version.
   - Automated SwissID OAuth flow with cache-first token reuse in `~/.postcards_rust/token.json` (no repeated 2FA prompts).
 - **⏱️ 7-Day Cooldown & State Tracking**:
   - Automatically respects the Swiss Post 7-day free card retention cooldown.

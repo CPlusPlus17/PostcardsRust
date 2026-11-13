@@ -26,10 +26,23 @@ pub const CLIENT_SECRET: &str = "89ff451ede545c3f408d792e8caaddf0";
 /// and a double slash (`v1//user/quota`) is 400'd by the API.
 pub const PCC_API_BASE: &str = "https://pccweb.api.post.ch/secure/api/mobile/v1";
 
-/// PCC mobile app version. The API's `appVersionValidation` gate rejects quota
-/// calls that don't present an app version; the real `ch.post.it.pcc` app sends
-/// it (version 4.38.1.0 as of Sep 2026).
-pub const PCC_APP_VERSION: &str = "4.38.1.0";
+/// Default PCC mobile app version. The API's `appVersionValidation` gate rejects
+/// calls that don't present a *currently supported* version of the real
+/// `ch.post.it.pcc` app (4.40.0.0 as of Nov 2026; 4.38.1.0 was cut off on
+/// 2026-11-06). Swiss Post retires old versions, so this needs bumping from
+/// time to time — see [`pcc_app_version`] for the runtime override.
+pub const PCC_APP_VERSION: &str = "4.40.0.0";
+
+/// App version sent as `PCCApp-Version`: `PCD_APP_VERSION` if set and
+/// non-empty, otherwise [`PCC_APP_VERSION`]. Lets a deployment follow a new
+/// app release without rebuilding.
+pub fn pcc_app_version() -> String {
+    std::env::var("PCD_APP_VERSION")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| PCC_APP_VERSION.to_string())
+}
 
 /// PCC mobile app OS identifier sent alongside `PCCApp-Version`.
 pub const PCC_APP_OS: &str = "Android";

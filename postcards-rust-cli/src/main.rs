@@ -499,7 +499,7 @@ async fn do_user(config: &AppConfig) -> anyhow::Result<()> {
 /// Probe app version.
 async fn do_probe(config: &AppConfig) -> anyhow::Result<()> {
     let api = pcc_api(config).await?;
-    let version = std::env::var("PCD_APP_VERSION").unwrap_or_else(|_| "4.38.1.0".to_string());
+    let version = postcards_rust_core::pcc_app_version();
     let results = api.probe_app_version(&version).await?;
     for (label, status, err) in results {
         println!("{label:40} -> {status}  {err}");
